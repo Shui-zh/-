@@ -268,7 +268,20 @@ Ubuntu 22.04 官方仓库缺少 SSH 插件，使用 Flatpak 版本：
     systemctl --user daemon-reload
     systemctl --user enable vncserver@2.service
     systemctl --user start vncserver@2.service
+===============================================================================
+十一，客户端连接步骤：
 
+# 启动 Remmina
+flatpak run org.remmina.Remmina
+
+在 Remmina 中：
+
+1. 点击"新建连接"
+2. 配置：
+   - 协议：VNC
+   - 服务器：服务器IP:5902（例如 192.168.1.100:5902）
+   - 密码：服务器端设置的 VNC 密码
+3. 保存并连接
 ================================================================================
 文档版本：1.0
 创建日期：2026-11-23

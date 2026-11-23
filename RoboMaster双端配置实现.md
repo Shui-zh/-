@@ -13,13 +13,15 @@
 
 Ubuntu 22.04（jammy）对应 ROS2 **Humble**。
 
+> **两端均已装好 Ubuntu 系统 + ROS2 环境**，本文不再涉及安装，只做：网络配置 → SSH/VNC 服务 → 环境对齐（以车机为准）→ 联调验证。
+
 ---
 
 ## 通用约定
 
 1. 用户名用 `<用户名>` 占位，替换成你实际的账号。
 2. `ROS_DOMAIN_ID` 两端必须**完全一致**。官方建议取 **0–101** 之间（避开 Linux 内核临时端口 32768–60999）。
-3. **`RMW_IMPLEMENTATION` 两端必须一致**。Humble 默认是 `rmw_fastrtps_cpp`，下文统一改用 `rmw_cyclonedds_cpp`，因为 Cyclone DDS 在直连无路由器场景下更容易通过 Peer 单播发现。
+3. **`RMW_IMPLEMENTATION` 两端必须一致**。**车机已装好 ROS2 环境，原则是笔记本向车机对齐**：车机用什么 DDS 就用什么，`ROS_DOMAIN_ID` 也照抄车机的。只有跨机发现失败、且车机允许改动时，才两端一起切 Cyclone DDS（见第四部分）。
 4. 网线直连不设网关/DNS。哨兵在 `192.168.8.x` 网段，与 Livox 雷达默认的 `192.168.1.x` 网段**天然不冲突**，这正好是选 8 网段的好处；但要注意同网段内其他设备（图传、裁判系统、队友调试机）不要撞地址。
 
 ---
@@ -61,73 +63,42 @@ ip -br addr show enp3s0      # 应看到 192.168.8.250/24
 > sudo nmcli con up "Wired connection 1"
 > ```
 
-## 步骤 2：安装 ROS2 Humble
+## 步骤 2：核对已有 ROS2 环境（车机已装，跳过安装）
 
-### 2.1 设置 locale（UTF-8）
+车机已有系统和 ROS2 环境，**不要重装**，只做三件事：确认版本、确认 DDS/RMW 实现和 ROS_DOMAIN_ID、确认工作空间位置。这些参数决定了笔记本端怎么配——**原则是笔记本向车机对齐，不动车机**。
+
+### 2.1 探查车机现状（SSH 上去逐条执行）
 
 ```bash
-locale                                # 确认输出含 UTF-8
-sudo apt update && sudo apt install -y locales
-sudo locale-gen en_US en_US.UTF-8
-sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-export LANG=en_US.UTF-8
+lsb_release -a                       # Ubuntu 版本（22.04 对应 Humble）
+printenv | grep -E "ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION|CYCLONEDDS_URI"
+ls /opt/ros/                         # 装了哪个发行版：humble / iron / galactic...
+ros2 --version
+ls ~/ | grep -i ws                   # 工作空间在哪，如 ros2_ws / catkin_ws(ROS1)
+grep -E "ROS|source" ~/.bashrc       # 看它自己写了哪些环境变量
+ros2 doctor --report | grep middleware   # 实际生效的 DDS 实现
 ```
 
-### 2.2 添加 ROS 2 apt 源
+### 2.2 判断结果
+
+- **ROS2 Humble**：笔记本装同名 Humble，直接联调（下文所有命令可用）。
+- **ROS1（如 melodic/noetic）**：与 ROS2 不能直接互通，笔记本要么也装 ROS1 对齐，要么走 `ros1_bridge`（不推荐新配）。
+- **RMW_IMPLEMENTATION 为空**：默认 Fast DDS（`rmw_fastrtps_cpp`）。**优先让笔记本也保持默认 Fast DDS**，只在跨机发现失败时再考虑两端一起切 Cyclone DDS——切换要改车机配置，能不动就不动。
+- **ROS_DOMAIN_ID 已设置**（比如车队自定义的 ID）：笔记本写**一模一样**的值。
+- **已有 CYCLONEDDS_URI / cyclonedds.xml**：读一下内容，笔记本照抄并只改 Peer Address 为对方 IP。
+
+### 2.3 笔记本按探查结果写环境变量（对齐示例）
 
 ```bash
-sudo apt install -y software-properties-common
-sudo add-apt-repository universe
-
-sudo apt update && sudo apt install -y curl
-sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-  -o /usr/share/keyrings/ros-archive-keyring.gpg
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
-  | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-```
-
-`$(. /etc/os-release && echo $UBUNTU_CODENAME)` 会自动展开成 `jammy`，比手写更不容易错。
-
-### 2.3 安装
-
-```bash
-sudo apt update
-sudo apt upgrade -y        # 官方明确要求：先升级，否则可能误删 systemd/udev 等关键包
-```
-
-车载机资源紧张，装**基础版**（无 GUI，带通信库、消息包、命令行工具）：
-
-```bash
-sudo apt install -y ros-humble-ros-base
-sudo apt install -y ros-dev-tools python3-colcon-common-extensions python3-rosdep
-sudo apt install -y ros-humble-rmw-cyclonedds-cpp
-```
-
-> 需要 rviz2、turtlesim 等 GUI 工具时再装 `ros-humble-desktop`。  
-> `ros-humble-rmw-cyclonedds-cpp` 是 Cyclone DDS 的 RMW 实现包，装了才能用 `rmw_cyclonedds_cpp`。
-
-### 2.4 环境配置
-
-```bash
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-echo "export ROS_DOMAIN_ID=42" >> ~/.bashrc
+echo "export ROS_DOMAIN_ID=<车机的值>" >> ~/.bashrc
+# 若车机用了 Cyclone DDS：
 echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
+echo "export CYCLONEDDS_URI=file://$HOME/.cyclonedds/cyclonedds.xml" >> ~/.bashrc
 source ~/.bashrc
 ```
 
-工作空间若在 `~/ros2_ws`，顺序很重要（工作空间必须放在 ROS 安装之后）：
-
-```bash
-echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
-```
-
-验证：
-
-```bash
-printenv | grep -E "ROS_DOMAIN_ID|RMW_IMPLEMENTATION"
-ros2 --version
-```
+> 只有在车机没装 `ros-humble-rmw-cyclonedds-cpp` 而你又决定切 Cyclone 时，才需要在车机补装这一条：
+> `sudo apt install -y ros-humble-rmw-cyclonedds-cpp`。否则车机一步都不用改。
 
 ## 步骤 3：安装 SSH 服务端
 
@@ -246,21 +217,27 @@ sudo netplan apply
 ping -c 3 192.168.8.250
 ```
 
-## 步骤 2：安装 ROS2 Humble（要跑 rviz2 才需要）
+## 步骤 2：核对已有 ROS2 环境并对齐车机（两端都已装，跳过安装）
 
-同被控端 2.1–2.2 添加源，然后装桌面版：
+笔记本和车机都已有 ROS2 环境，本步骤不装任何东西，只做**对齐**。先探查笔记本自己的现状：
 
 ```bash
-sudo apt install -y ros-humble-desktop
-sudo apt install -y ros-humble-rmw-cyclonedds-cpp
-
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-echo "export ROS_DOMAIN_ID=42" >> ~/.bashrc
-echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
-source ~/.bashrc
+ls /opt/ros/                              # 笔记本装的发行版
+printenv | grep -E "ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION|CYCLONEDDS_URI"
+ros2 doctor --report | grep middleware
 ```
 
-> 只做 SSH + VNC 的话可跳过本步骤。
+然后按第一部分 2.2 的规则与车机对齐（**车机为准**）：
+
+| 检查项 | 要求 | 笔记本写法 |
+| --- | --- | --- |
+| 发行版 | 两端一致（22.04 → Humble） | 不一致需补装对齐版本 |
+| `ROS_DOMAIN_ID` | 两端完全一致 | `echo "export ROS_DOMAIN_ID=<车机的值>" >> ~/.bashrc` |
+| RMW / DDS | 两端一致 | 车机用 Cyclone 才加 `RMW_IMPLEMENTATION` 和 `CYCLONEDDS_URI`（文件照抄车机的，只改 Peer Address 为 192.168.8.250） |
+
+改完 `source ~/.bashrc`。若车机是 ROS1，见第一部分 2.2 的处理分支。
+
+> 不跑 rviz2 的话，笔记本只需要基础通信能力；已有 `ros-humble-desktop` 更好，不用动。
 
 ## 步骤 3：SSH 免密 + 别名
 

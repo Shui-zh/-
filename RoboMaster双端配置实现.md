@@ -65,15 +65,10 @@ ip -br addr show enp3s0      # 应看到 192.168.8.250/24
 
 ## 步骤 2：核对已有 ROS2 环境（车机已装，跳过安装）
 
-车机已有系统和 ROS2 环境，**不要重装**，只做三件事：确认版本、确认 DDS/RMW 实现和 ROS_DOMAIN_ID、确认工作空间位置。这些参数决定了笔记本端怎么配——**原则是笔记本向车机对齐，不动车机**。
+确认 DDS/RMW 实现和 ROS_DOMAIN_ID、确认工作空间位置。这些参数决定了笔记本端怎么配——**原则是笔记本向车机对齐，不动车机**。
 
 ### 2.1 探查车机现状（SSH 上去逐条执行）
 
-```bash
-lsb_release -a                       # Ubuntu 版本（22.04 对应 Humble）
-printenv | grep -E "ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION|CYCLONEDDS_URI"
-ls /opt/ros/                         # 装了哪个发行版：humble / iron / galactic...
-ros2 --version
 ls ~/ | grep -i ws                   # 工作空间在哪，如 ros2_ws / catkin_ws(ROS1)
 grep -E "ROS|source" ~/.bashrc       # 看它自己写了哪些环境变量
 ros2 doctor --report | grep middleware   # 实际生效的 DDS 实现
@@ -81,8 +76,6 @@ ros2 doctor --report | grep middleware   # 实际生效的 DDS 实现
 
 ### 2.2 判断结果
 
-- **ROS2 Humble**：笔记本装同名 Humble，直接联调（下文所有命令可用）。
-- **ROS1（如 melodic/noetic）**：与 ROS2 不能直接互通，笔记本要么也装 ROS1 对齐，要么走 `ros1_bridge`（不推荐新配）。
 - **RMW_IMPLEMENTATION 为空**：默认 Fast DDS（`rmw_fastrtps_cpp`）。**优先让笔记本也保持默认 Fast DDS**，只在跨机发现失败时再考虑两端一起切 Cyclone DDS——切换要改车机配置，能不动就不动。
 - **ROS_DOMAIN_ID 已设置**（比如车队自定义的 ID）：笔记本写**一模一样**的值。
 - **已有 CYCLONEDDS_URI / cyclonedds.xml**：读一下内容，笔记本照抄并只改 Peer Address 为对方 IP。
@@ -96,9 +89,6 @@ echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
 echo "export CYCLONEDDS_URI=file://$HOME/.cyclonedds/cyclonedds.xml" >> ~/.bashrc
 source ~/.bashrc
 ```
-
-> 只有在车机没装 `ros-humble-rmw-cyclonedds-cpp` 而你又决定切 Cyclone 时，才需要在车机补装这一条：
-> `sudo apt install -y ros-humble-rmw-cyclonedds-cpp`。否则车机一步都不用改。
 
 ## 步骤 3：安装 SSH 服务端
 
@@ -222,7 +212,6 @@ ping -c 3 192.168.8.250
 笔记本和车机都已有 ROS2 环境，本步骤不装任何东西，只做**对齐**。先探查笔记本自己的现状：
 
 ```bash
-ls /opt/ros/                              # 笔记本装的发行版
 printenv | grep -E "ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION|CYCLONEDDS_URI"
 ros2 doctor --report | grep middleware
 ```
@@ -231,13 +220,11 @@ ros2 doctor --report | grep middleware
 
 | 检查项 | 要求 | 笔记本写法 |
 | --- | --- | --- |
-| 发行版 | 两端一致（22.04 → Humble） | 不一致需补装对齐版本 |
 | `ROS_DOMAIN_ID` | 两端完全一致 | `echo "export ROS_DOMAIN_ID=<车机的值>" >> ~/.bashrc` |
 | RMW / DDS | 两端一致 | 车机用 Cyclone 才加 `RMW_IMPLEMENTATION` 和 `CYCLONEDDS_URI`（文件照抄车机的，只改 Peer Address 为 192.168.8.250） |
 
-改完 `source ~/.bashrc`。若车机是 ROS1，见第一部分 2.2 的处理分支。
+改完 `source ~/.bashrc`。
 
-> 不跑 rviz2 的话，笔记本只需要基础通信能力；已有 `ros-humble-desktop` 更好，不用动。
 
 ## 步骤 3：SSH 免密 + 别名
 

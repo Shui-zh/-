@@ -1,0 +1,275 @@
+================================================================================
+VNC 远程桌面完整安装指南
+================================================================================
+适用于 Ubuntu 22.04，包含 Remmina 客户端和 TigerVNC 服务器配置。
+
+================================================================================
+一、安装 Remmina 客户端（带 SSH 插件）
+================================================================================
+
+Ubuntu 22.04 官方仓库缺少 SSH 插件，使用 Flatpak 版本：
+
+    # 1. 安装 Flatpak
+    sudo apt install -y flatpak
+
+    # 2. 添加 Flathub 仓库
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+    # 3. 安装 Remmina（包含所有插件）
+    flatpak install flathub org.remmina.Remmina
+
+    # 4. 启动
+    flatpak run org.remmina.Remmina
+
+================================================================================
+二、安装 VNC 服务器和桌面环境
+================================================================================
+
+    # 1. 更新软件源（建议先换国内源加速）
+    sudo cp /etc/apt/sources.list /etc/apt/sources.list.backup
+    sudo sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+    sudo sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+    sudo apt update
+
+    # 2. 安装 TigerVNC
+    sudo apt install -y tigervnc-standalone-server tigervnc-common
+
+    # 3. 安装 XFCE4 桌面环境
+    sudo apt install -y xfce4 xfce4-goodies
+
+================================================================================
+三、配置 VNC 服务器
+================================================================================
+
+    # 1. 设置 VNC 密码（会提示输入两次）
+    vncpasswd
+
+    # 2. 创建配置目录
+    mkdir -p ~/.vnc
+
+    # 3. 创建 VNC 配置文件 ~/.vnc/config
+    session=xfce
+    geometry=1920x1080
+    depth=24
+    localhost=no
+
+    # 4. 创建启动脚本 ~/.vnc/xstartup（解决 Wayland 兼容性问题）
+    #!/bin/sh
+
+    # 清除 Wayland 和会话变量
+    unset WAYLAND_DISPLAY
+    unset XDG_SESSION_TYPE
+    unset XDG_CURRENT_DESKTOP
+    unset SESSION_MANAGER
+    unset DBUS_SESSION_BUS_ADDRESS
+    unset XDG_RUNTIME_DIR
+
+    # 设置显示
+    export DISPLAY=:2
+    export XDG_SESSION_TYPE=x11
+
+    # 启动 dbus
+    if command -v dbus-launch >/dev/null 2>&1; then
+        eval $(dbus-launch --sh-syntax)
+    fi
+
+    # 禁用屏幕保护
+    xset -dpms 2>/dev/null
+    xset s noblank 2>/dev/null
+    xset s off 2>/dev/null
+
+    # 启动 XFCE4
+    exec startxfce4
+
+    # 5. 添加执行权限
+    chmod +x ~/.vnc/xstartup
+
+================================================================================
+四、启动 VNC 服务器
+================================================================================
+
+    # 1. 清理可能的残留文件
+    rm -f /tmp/.X2-lock /tmp/.X11-unix/X2
+
+    # 2. 启动 VNC（使用显示号 :2，端口 5902）
+    vncserver :2 -geometry 1920x1080 -depth 24
+
+    # 3. 检查运行状态
+    vncserver -list
+
+应该看到：
+    X DISPLAY #    RFB PORT #    PROCESS ID #
+    2              5902          12345
+
+================================================================================
+五、使用 Remmina 连接
+================================================================================
+
+1. 启动 Remmina：flatpak run org.remmina.Remmina
+2. 点击"新建连接"
+3. 配置：
+   - 协议：VNC
+   - 服务器：localhost:5902（本机）或 服务器IP:5902（远程）
+   - 密码：之前设置的 VNC 密码
+   - 颜色深度：True color (24 bit)
+4. 保存并连接
+
+================================================================================
+六、常用管理命令
+================================================================================
+
+    # 查看运行状态
+    vncserver -list
+
+    # 停止 VNC
+    vncserver -kill :2
+
+    # 重启 VNC
+    vncserver -kill :2 && vncserver :2 -geometry 1920x1080 -depth 24
+
+    # 查看日志
+    tail -f ~/.vnc/*.log
+
+    # 修改密码
+    vncpasswd
+
+================================================================================
+七、常见问题处理
+================================================================================
+
+问题 1：显示号被占用
+-------------------
+    # 查看占用情况
+    ls -la /tmp/.X*-lock
+
+    # 清理残留
+    rm -f /tmp/.X*-lock /tmp/.X11-unix/X*
+
+    # 使用其他显示号
+    vncserver :3 -geometry 1920x1080 -depth 24
+
+问题 2：XFCE4 启动失败（Wayland 错误）
+--------------------------------------
+- 确保 ~/.vnc/xstartup 包含 unset WAYLAND_DISPLAY
+- 或改用 Openbox：sudo apt install openbox，启动脚本改为 exec openbox-session
+
+问题 3：防火墙阻止连接
+----------------------
+    sudo ufw allow 5902/tcp
+    sudo ufw status
+
+问题 4：远程访问（通过 SSH 隧道）
+--------------------------------
+    # 在客户端机器执行
+    ssh -L 5902:localhost:5902 user@服务器IP
+
+    # 然后用 Remmina 连接 localhost:5902
+
+================================================================================
+八、一键安装脚本
+================================================================================
+
+将以下内容保存为 install_vnc.sh，在目标机器执行：
+
+    #!/bin/bash
+    set -e
+
+    echo "=== 安装 VNC 服务器 ==="
+
+    # 换源（可选）
+    sudo cp /etc/apt/sources.list /etc/apt/sources.list.backup 2>/dev/null || true
+    sudo sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+    sudo sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+    sudo apt update
+
+    # 安装软件
+    sudo apt install -y tigervnc-standalone-server tigervnc-common xfce4 xfce4-goodies
+
+    # 配置
+    mkdir -p ~/.vnc
+
+    # 写入 ~/.vnc/config
+    echo "session=xfce" > ~/.vnc/config
+    echo "geometry=1920x1080" >> ~/.vnc/config
+    echo "depth=24" >> ~/.vnc/config
+    echo "localhost=no" >> ~/.vnc/config
+
+    # 写入 ~/.vnc/xstartup
+    cat > ~/.vnc/xstartup << 'XEOF'
+    #!/bin/sh
+    unset WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
+    unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
+    export DISPLAY=:2 XDG_SESSION_TYPE=x11
+    [ -x /usr/bin/dbus-launch ] && eval $(dbus-launch --sh-syntax)
+    xset -dpms s noblank s off 2>/dev/null
+    exec startxfce4
+    XEOF
+
+    chmod +x ~/.vnc/xstartup
+
+    # 设置密码
+    echo "请设置 VNC 密码："
+    vncpasswd
+
+    # 启动
+    rm -f /tmp/.X2-lock /tmp/.X11-unix/X2
+    vncserver :2 -geometry 1920x1080 -depth 24
+
+    echo ""
+    echo "=== 安装完成 ==="
+    echo "连接信息：localhost:5902"
+    echo "启动 Remmina：flatpak run org.remmina.Remmina"
+
+使用方法：
+    chmod +x install_vnc.sh
+    ./install_vnc.sh
+
+================================================================================
+九、客户端机器配置
+================================================================================
+
+只需安装 Remmina：
+
+    # 安装 Flatpak 和 Remmina
+    sudo apt install -y flatpak
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    flatpak install flathub org.remmina.Remmina
+
+    # 启动
+    flatpak run org.remmina.Remmina
+
+连接配置：
+- 协议：VNC
+- 服务器：服务器IP:5902
+- 密码：服务器端设置的 VNC 密码
+
+================================================================================
+十、开机自启动配置（可选）
+================================================================================
+
+    # 创建 systemd 服务
+    mkdir -p ~/.config/systemd/user
+
+    # 写入 ~/.config/systemd/user/vncserver@.service
+    [Unit]
+    Description=TigerVNC server display %i
+    After=syslog.target network.target
+
+    [Service]
+    Type=forking
+    ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :%i > /dev/null 2>&1 || :'
+    ExecStart=/usr/bin/vncserver :%i -geometry 1920x1080 -depth 24
+    ExecStop=/usr/bin/vncserver -kill :%i
+
+    [Install]
+    WantedBy=default.target
+
+    # 启用服务
+    systemctl --user daemon-reload
+    systemctl --user enable vncserver@2.service
+    systemctl --user start vncserver@2.service
+
+================================================================================
+文档版本：1.0
+创建日期：2026-11-23
+================================================================================

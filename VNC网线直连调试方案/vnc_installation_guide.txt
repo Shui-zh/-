@@ -244,32 +244,7 @@ Ubuntu 22.04 官方仓库缺少 SSH 插件，使用 Flatpak 版本：
 - 密码：服务器端设置的 VNC 密码
 
 ================================================================================
-十、开机自启动配置（可选）（linger = no 的情况下，车机必须登陆图形化界面才能自启动VNC）
-================================================================================
-
-    # 创建 systemd 服务
-    mkdir -p ~/.config/systemd/user
-
-    # 写入 ~/.config/systemd/user/vncserver@.service
-    [Unit]
-    Description=TigerVNC server display %i
-    After=syslog.target network.target
-
-    [Service]
-    Type=forking
-    ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :%i > /dev/null 2>&1 || :'
-    ExecStart=/usr/bin/vncserver :%i -geometry 1920x1080 -depth 24
-    ExecStop=/usr/bin/vncserver -kill :%i
-
-    [Install]
-    WantedBy=default.target
-
-    # 启用服务
-    systemctl --user daemon-reload
-    systemctl --user enable vncserver@2.service
-    systemctl --user start vncserver@2.service
-===============================================================================
-十一，客户端连接步骤：
+十，客户端连接步骤：
 
 # 启动 Remmina
 flatpak run org.remmina.Remmina
